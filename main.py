@@ -15,6 +15,7 @@ License: MIT
 Repository: https://github.com/Fordywhat/discord-activity-tracker
 """
 
+
 import os
 from dotenv import load_dotenv
 import discord
@@ -23,10 +24,10 @@ from discord import app_commands
 import openpyxl
 import datetime
 
+
 # ---------------------------------------------------------------------------
 # Loading Enviornment Variables
 # ---------------------------------------------------------------------------
-
 print('------')
 print('Loading environment variables...')
 
@@ -39,7 +40,6 @@ GUILD_ID = int(os.getenv("GUILD_ID"))  # Convert to int for command registration
 # ---------------------------------------------------------------------------
 # Workbook Setup
 # ---------------------------------------------------------------------------
-
 print('------')
 print('Loading workbook...')
 
@@ -61,6 +61,15 @@ INVITE_DATE = 3
 EVENT_CONTENT = 3
 TOTAL_MESSAGE = 4
 TOTAL_CALL = 5
+
+
+# ---------------------------------------------------------------------------
+# Text File Setup
+# ---------------------------------------------------------------------------
+print('------')
+print('opening text log...')
+
+textLog = open('activity.txt', 'a')
 
 # ---------------------------------------------------------------------------
 # Helper Functions
@@ -154,6 +163,24 @@ def updateSpreadsheet(user_id, type, time, content):
     updateSpreadsheet(user_id, type, time, content)
 
 
+def updateTextLog(user_id, type, time, content):
+    """
+    Update the text log file with a new event.
+
+    Args:
+    user_id (str): The ID of the user.
+    event_type (str): The type of event ('invite', 'message', 'voice').
+    event_time (str): The timestamp of the event.
+    event_content (str): The content of the event (e.g., message text).
+    """
+    print('------')
+    print(f'Updating text log for user {user_id} with event {type} at {time}.')
+
+    textLog.write(f'{time}\t|\t{type}\t|\t{user_id}\t|\t{content}\n')
+
+    print('Text log updated.') 
+
+
 def getLastTimeOfEvent(user_id, event_type):
     """
     Retrieve the last event time of a specific type for a user.
@@ -244,6 +271,7 @@ def getInviter(user_id):
 
     return inviter
 
+
 # ---------------------------------------------------------------------------
 # Discord Bot Setup
 # ---------------------------------------------------------------------------
@@ -302,14 +330,17 @@ class Client(commands.Bot):
 
     async def on_member_join(self, member):
         """Triggered when a new member joins the server."""
-
-        print('------')
-        print(f'Member {member.name} has joined the server.')
         
         if member.bot:
             return
+        
+        print('------')
+        print(f'{member.name} has joined the server.')
 
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        textLog.write(f'{time}\t|\tJoin\t|\t{member.name}\t|\t Invitee: {getInviter(member.name)}\n')
+
 
         createUserSheet(member.name, 
                           'N/A', 
@@ -328,29 +359,53 @@ class Client(commands.Bot):
     async def on_member_remove(self, member):
         """Triggered when a member leaves the server."""
 
-        print('------')
-        print(f'Member {member.name} has left the server.')
-
         if member.bot:
             return
+        
+        print('------')
+        print(f'{member.name} has left the server.')
+
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        textLog.write(f'{time}\t|\tLeave\t|\t{member.name}\t|\tLeft\n')
 
         updateSpreadsheet(member.name, 
                           'Leave', 
-                          datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                          time, 
                           'Left the server')
         
+        print('notifying server...')
+
         message = member.name + ' has left the server.\n'
         message += 'They were originally invited by ' + getInviter(member.name) + ' on ' + getLastTimeOfEvent(member.name, 'Join') + '.\n'
         message += 'They sent a total of ' + str(getTotalMessages(member.name)) + ' messages.\n'
         message += 'They joined a total of ' + str(getTotalCalls(member.name)) + ' voice calls.\n'
-
-        print('notifying server...')
 
         channel = self.guilds[0].system_channel
 
         await channel.send(message)
 
         print('server notified.')
+
+    async def on_message_edit(self, before, after):
+        """Triggered when a user edits a message."""
+
+        if before.author.bot:
+            return
+        elif before.content == after.content:
+            return
+        
+        print('------')
+        print(f'Message edited by {before.author}: from "{before.content}" to "{after.content}"')
+        
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        textLog.write(f'{time}\t|\tEdit\t|\t{before.author.name}\t|\tEdited message from "{before.content}" to "{after.content}"\n')
+
+        updateSpreadsheet(before.author.name, 
+                          'Edit', 
+                          time, 
+                          f'Edited message from "{before.content}" to "{after.content}"')
 
 
 # ---------------------------------------------------------------------------
