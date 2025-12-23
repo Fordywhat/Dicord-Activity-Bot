@@ -1,5 +1,5 @@
 """
-Discord Activity Tracker Bot
+Discord Activity Bot
 ============================
 
 An open-source Discord bot that tracks user activity in both text and voice channels
@@ -71,6 +71,17 @@ print('opening text log...')
 
 textLog = open('activity.txt', 'a')
 
+
+# ---------------------------------------------------------------------------
+# Invite Setup
+# ---------------------------------------------------------------------------
+print('------')
+print('Loading invites...')
+
+global invites
+invites = []  # Will be populated on bot ready
+
+
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
@@ -88,7 +99,18 @@ def createUserSheet(user_id, invited_by, invite_date):
 
     for id in workbook.sheetnames:
         if id == user_id:
-            print(f'User sheet for {user_id} already exists. Skipping creation.')
+            print(f'User sheet for {user_id} already exists. Updating Information...')
+
+            user_worksheet = workbook[id]
+
+            row_2 = [user_id, invited_by, invite_date, 0, 0]
+
+            user_worksheet.cell(row=HEADER_DATA_ROW, column=USER_ID, value=row_2[0])
+            user_worksheet.cell(row=HEADER_DATA_ROW, column=INVITED_BY, value=row_2[1])
+            user_worksheet.cell(row=HEADER_DATA_ROW, column=INVITE_DATE, value=row_2[2])
+            user_worksheet.cell(row=HEADER_DATA_ROW, column=TOTAL_MESSAGE, value=row_2[3])
+            user_worksheet.cell(row=HEADER_DATA_ROW, column=TOTAL_CALL, value=row_2[4]) 
+            
             return
 
     user_worksheet = workbook.create_sheet(title=user_id)
@@ -118,6 +140,7 @@ def createUserSheet(user_id, invited_by, invite_date):
     print('Saving workbook...')
 
     workbook.save(WORKBOOK_PATH)
+
 
 def updateSpreadsheet(user_id, type, time, content):
     """
@@ -227,6 +250,7 @@ def getTotalMessages(user_id):
 
     return total_messages
 
+
 def getTotalCalls(user_id):
     """
     Retrieve the total number of voice calls joined by a user.
@@ -248,6 +272,7 @@ def getTotalCalls(user_id):
     print(f'Total calls for user {user_id}: {total_calls}')
 
     return total_calls
+
 
 def getInviter(user_id):
     """
@@ -272,6 +297,41 @@ def getInviter(user_id):
     return inviter
 
 
+async def updateInvites(self):
+    """
+    Update the invites dictionary with current invite codes and their uses.
+    """
+    print('------')
+    print('Updating invites...')
+
+    invite_list = await self.guilds[0].invites()
+
+    print(f'Invites for {self.guilds[0].name} updated.')
+
+    return invite_list
+
+
+async def memberJoinHelper(self):
+    """
+    Get the inviter of a member who just joined by comparing invite uses.
+    """
+    global invites
+
+    inviter = 'N/A'
+
+    inviteUses = {}
+    for invite in invites:
+        inviteUses[invite] = invite.uses
+
+    invites = await updateInvites(self)
+
+    for invite in invites:
+        if invite.uses > inviteUses.get(invite, 0):
+            inviter = invite.inviter.name
+            break
+
+    return inviter
+
 # ---------------------------------------------------------------------------
 # Discord Bot Setup
 # ---------------------------------------------------------------------------
@@ -283,6 +343,8 @@ class Client(commands.Bot):
         
         print('------')
         print(f'Logged in as {self.user}')
+
+        invites = await updateInvites(self)
         
         '''
         If you wish to quickly sync updates to your discord, this is a template to do so
@@ -307,9 +369,11 @@ class Client(commands.Bot):
         print('------')
         print(f'Message from {message.author}: {message.content}')
 
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         updateSpreadsheet(message.author.name, 
                           'Message', 
-                          datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                          time, 
                           message.content)
 
 
@@ -319,31 +383,34 @@ class Client(commands.Bot):
         if member.bot:
             return
 
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         if before.channel is None and after.channel is not None:  # User joined a voice channel
             print('------')
             print(f'{member.name} joined voice channel {after.channel.name}.')
             updateSpreadsheet(member.name, 
                               'Call', 
-                              datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                              time, 
                               'Joined ' + after.channel.name)
             
 
     async def on_member_join(self, member):
         """Triggered when a new member joins the server."""
-        
+
         if member.bot:
             return
         
         print('------')
         print(f'{member.name} has joined the server.')
 
+        inviter = await memberJoinHelper(self)
+
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        textLog.write(f'{time}\t|\tJoin\t|\t{member.name}\t|\t Invitee: {getInviter(member.name)}\n')
-
-
+        textLog.write(f'{time}\t|\tJoin\t|\t{member.name}\t|\t Invitee: {inviter}\n')
+        
         createUserSheet(member.name, 
-                          'N/A', 
+                          inviter, 
                           time)
         updateSpreadsheet(member.name,
                           'Join', 
@@ -355,6 +422,25 @@ class Client(commands.Bot):
         channel = self.guilds[0].system_channel
 
         await channel.send(message)
+
+
+    async def on_invite_create(self, invite):
+        """Triggered when a new invite is created."""
+        
+        print('------')
+        print(f'New invite created by {invite.inviter}: {invite.code}')
+
+        invites = await updateInvites(self)
+
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        textLog.write(f'{time}\t|\tInvite\t|\t{invite.inviter.name}\t|\tInvite Code: {invite.code}\n')
+
+        updateSpreadsheet(invite.inviter.name, 
+                          'Invite', 
+                          time, 
+                          f'Invite Code: {invite.code}')
+
 
     async def on_member_remove(self, member):
         """Triggered when a member leaves the server."""
@@ -387,6 +473,7 @@ class Client(commands.Bot):
 
         print('server notified.')
 
+
     async def on_message_edit(self, before, after):
         """Triggered when a user edits a message."""
 
@@ -415,6 +502,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
+intents.invites = True
 client = Client(command_prefix='!', intents=intents)
 
 @client.tree.command(name="get-user-activity", description="Get a user's activity summary", guild=discord.Object(id=GUILD_ID))
@@ -430,10 +518,10 @@ async def activity_check(interaction: discord.Interaction, user: discord.Member)
 
     message = f'User {user.mention} Activity Summary:\n'
     message += '-----------------------------------------------------\n'
-    message += f'Last Message Sent:        {lastMessageDateTime}\n'
+    message += f'Last Message Sent:         {lastMessageDateTime}\n'
     message += f'Last Voice Call Joined:   {lastVoiceJoinDateTime}\n'
     message += '-----------------------------------------------------\n'
-    message += f'Total Messages Sent:      {totalMessages}\n'
+    message += f'Total Messages Sent:       {totalMessages}\n'
     message += f'Total Voice Calls Joined: {totalCalls}\n'
 
     await interaction.response.send_message(message)
